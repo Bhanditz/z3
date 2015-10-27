@@ -69,6 +69,7 @@ VS_PROJ = False
 TRACE = False
 DOTNET_ENABLED=False
 JAVA_ENABLED=False
+NODEJS_ENABLED=False
 ML_ENABLED=False
 STATIC_LIB=False
 VER_MAJOR=None
@@ -588,13 +589,13 @@ def display_help(exit_code):
 # Parse configuration option for mk_make script
 def parse_options():
     global VERBOSE, DEBUG_MODE, IS_WINDOWS, VS_X64, ONLY_MAKEFILES, SHOW_CPPS, VS_PROJ, TRACE, VS_PAR, VS_PAR_NUM
-    global DOTNET_ENABLED, JAVA_ENABLED, ML_ENABLED, STATIC_LIB, PREFIX, GMP, FOCI2, FOCI2LIB, PYTHON_PACKAGE_DIR, GPROF, GIT_HASH
+    global DOTNET_ENABLED, JAVA_ENABLED, NODEJS_ENABLED, ML_ENABLED, STATIC_LIB, PREFIX, GMP, FOCI2, FOCI2LIB, PYTHON_PACKAGE_DIR, GPROF, GIT_HASH
     global LINUX_X64, SLOW_OPTIMIZE, USE_OMP
     try:
         options, remainder = getopt.gnu_getopt(sys.argv[1:],
                                                'b:df:sxhmcvtnp:gj',
                                                ['build=', 'debug', 'silent', 'x64', 'help', 'makefiles', 'showcpp', 'vsproj',
-                                                'trace', 'nodotnet', 'staticlib', 'prefix=', 'gmp', 'foci2=', 'java', 'parallel=', 'gprof',
+                                                'trace', 'nodotnet', 'staticlib', 'prefix=', 'gmp', 'foci2=', 'java', 'nodejs', 'parallel=', 'gprof',
                                                 'githash=', 'x86', 'ml', 'optimize', 'noomp'])
     except:
         print("ERROR: Invalid command line option")
@@ -648,6 +649,8 @@ def parse_options():
             FOCI2LIB = arg
         elif opt in ('-j', '--java'):
             JAVA_ENABLED = True
+        elif opt == '--nodejs':
+            NODEJS_ENABLED = True
         elif opt == '--gprof':
             GPROF = True
         elif opt == '--githash':
@@ -742,6 +745,9 @@ def is_verbose():
 
 def is_java_enabled():
     return JAVA_ENABLED
+
+def is_nodejs_enabled():
+    return NODEJS_ENABLED
 
 def is_ml_enabled():
     return ML_ENABLED
@@ -1409,6 +1415,41 @@ class JavaDLLComponent(Component):
             out.write('\t@rm %s\n' % (os.path.join('$(PREFIX)', 'lib', dllfile)))
             out.write('\t@rm %s.jar\n' % (os.path.join('$(PREFIX)', 'lib', self.package_name)))
 
+class NodeJSComponent(Component):
+    def __init__(self, name, path, deps):
+        Component.__init__(self, name, path, deps)
+
+    def mk_makefile(self, out):
+        if is_nodejs_enabled():
+            CP_CMD = "cp"
+            src_dir = self.to_src_dir
+            jstargets = []
+            sub_dir = "js"
+            mk_dir(os.path.join(BUILD_DIR, sub_dir))
+	    for targ in ['package.json', 'index.js'] + [os.path.join(sub_dir, f) for f
+                    in os.listdir(os.path.join(self.src_dir, sub_dir)) if f.endswith('.js') or f.endswith('.md')]:
+                out.write('%s: %s\n' % (targ,os.path.join(src_dir,targ)))
+                str = '\t%s %s %s\n' % (CP_CMD,os.path.join(src_dir,targ),targ)
+                out.write(str)
+                jstargets.append(targ)
+            out.write('%s: %s\n' % (self.name, ' '.join(jstargets)))
+
+    def main_component(self):
+        return is_nodejs_enabled()
+
+    def mk_win_dist(self, build_path, dist_path):
+        pass
+
+    def mk_unix_dist(self, build_path, dist_path):
+        pass
+
+    def mk_install(self, out):
+        pass
+
+    def mk_uninstall(self, out):
+        pass
+
+
 class MLComponent(Component):
     def __init__(self, name, lib_name, path, deps):
         Component.__init__(self, name, path, deps)
@@ -1748,6 +1789,10 @@ def add_dot_net_dll(name, deps=[], path=None, dll_name=None, assembly_info_dir=N
 
 def add_java_dll(name, deps=[], path=None, dll_name=None, package_name=None, manifest_file=None):
     c = JavaDLLComponent(name, dll_name, package_name, manifest_file, path, deps)
+    reg_component(name, c)
+
+def add_nodejs(name, deps=[], path=None):
+    c = NodeJSComponent(name, path, deps)
     reg_component(name, c)
 
 def add_ml_lib(name, deps=[], path=None, lib_name=None):

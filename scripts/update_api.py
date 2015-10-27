@@ -24,11 +24,14 @@ from mk_exception import *
 #
 api_dir     = get_component('api').src_dir
 dotnet_dir  = get_component('dotnet').src_dir
+nodejs_dir  = get_component('nodejs').src_dir
 
 log_h   = open(os.path.join(api_dir, 'api_log_macros.h'), 'w')
 log_c   = open(os.path.join(api_dir, 'api_log_macros.cpp'), 'w')
 exe_c   = open(os.path.join(api_dir, 'api_commands.cpp'), 'w')
 core_py = open(os.path.join(get_z3py_dir(), 'z3core.py'), 'w')
+node_type_file = os.path.join(nodejs_dir, 'js', 'z3types.js')
+node_core_file = os.path.join(nodejs_dir, 'js', 'z3core.js')
 dotnet_fileout = os.path.join(dotnet_dir, 'Native.cs')
 ##
 log_h.write('// Automatically generated file\n')
@@ -143,6 +146,12 @@ Type2PyStr = { VOID_PTR : 'ctypes.c_void_p', INT : 'ctypes.c_int', UINT : 'ctype
                PRINT_MODE : 'ctypes.c_uint', ERROR_CODE : 'ctypes.c_uint'
                }
 
+Type2NodeStr = { VOID: 'ref.types.void', VOID_PTR : 'ref.refType(ref.types.void)', INT : 'ref.types.int', UINT : 'ref.types.uint', INT64 : 'ref.types.int64',
+               UINT64 : 'ref.types.uint64', DOUBLE : 'ref.types.double', FLOAT : 'ref.types.float',
+               STRING : 'ref.types.CString', STRING_PTR : 'ref.refType(ref.types.CString)', BOOL : 'ref.types.bool', SYMBOL : 'ref.types.long',
+               PRINT_MODE : 'ref.types.uint', ERROR_CODE : 'ref.types.uint'
+               }
+
 # Mapping to .NET types
 Type2Dotnet = { VOID : 'void', VOID_PTR : 'IntPtr', INT : 'int', UINT : 'uint', INT64 : 'Int64', UINT64 : 'UInt64', DOUBLE : 'double',
                 FLOAT : 'float', STRING : 'string', STRING_PTR : 'byte**', BOOL : 'int', SYMBOL : 'IntPtr',
@@ -169,6 +178,7 @@ def def_Type(var, c_type, py_type):
     exec('%s = %s' % (var, next_type_id), globals())
     Type2Str[next_type_id]   = c_type
     Type2PyStr[next_type_id] = py_type
+    Type2PyStr[next_type_id] = py_type
     next_type_id    = next_type_id + 1
 
 def def_Types():
@@ -185,6 +195,7 @@ def def_Types():
         if is_obj(k):
             Type2Dotnet[k] = v
             Type2ML[k] = v.lower()
+            Type2NodeStr[k] = v.replace('Z3_', '').title().replace('_', '')
 
 def type2str(ty):
     global Type2Str
@@ -193,6 +204,13 @@ def type2str(ty):
 def type2pystr(ty):
     global Type2PyStr
     return Type2PyStr[ty]
+
+def type2nodestr(ty):
+    global Type2NodeStr
+    if is_obj(ty):
+      return 'z3types.' + Type2NodeStr[ty]
+    else:
+      return Type2NodeStr[ty]
 
 def type2dotnet(ty):
     global Type2Dotnet
@@ -324,6 +342,12 @@ def param2pystr(p):
     else:
         return type2pystr(param_type(p))
 
+def param2nodestr(p):
+    if param_kind(p) == IN_ARRAY or param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY or param_kind(p) == OUT:
+        return "ref.refType(%s)" % type2nodestr(param_type(p))
+    else:
+        return type2nodestr(param_type(p))
+
 def param2ml(p):
     k = param_kind(p)
     if k == OUT:
@@ -406,6 +430,51 @@ def mk_py_wrappers():
             core_py.write("  return r\n")
         core_py.write("\n")
 
+
+# NodeJS bindings
+_node_decls = []
+def reg_node_binding(name, result, params):
+    global _node_decls
+    _node_decls.append((name, result, params))
+
+def mk_node_files():
+    global node_type_file
+    global node_core_file
+    with open(node_type_file, 'w') as type_js:
+       lines = []
+       for k, name in Type2NodeStr.iteritems():
+            if is_obj(k):
+                lines.append('%s: ref.refType(ref.types.void)' % name)
+            else:
+                lines.append('// %s' % name)
+       typedecls = ',\n  '.join(lines)
+       type_js.write("""
+// Automatically generated file
+var ref = require('ref');
+
+// Z3 API Types
+module.exports = {
+  """ + typedecls + """
+};
+""")
+
+    with open(node_core_file, 'w') as core_js:
+        lines = []
+        for name, result, params in _node_decls:
+            pl = ','.join([param2nodestr(p) for p in params])
+            lines.append("'%s': [%s,[%s]]" % (name, type2nodestr(result), pl))
+        bindings = ',\n  '.join(lines)
+        core_js.write("""
+// Automatically generated file
+var ref = require('ref');
+var ffi = require('ffi');
+var z3types = require('./z3types');
+
+// Z3 API Functions
+var z3core = module.exports = ffi.Library('libz3', {
+  """ + bindings + """\n
+});
+""")
 
 ## .NET API native interface
 _dotnet_decls = []
@@ -913,6 +982,7 @@ def def_API(name, result, params):
     global API2Id, next_id
     global log_h, log_c
     mk_py_binding(name, result, params)
+    reg_node_binding(name, result, params)
     reg_dotnet(name, result, params)
     API2Id[next_id] = name
     mk_log_header(log_h, name, params)
@@ -1552,6 +1622,7 @@ def_Types()
 def_APIs()
 mk_bindings()
 mk_py_wrappers()
+mk_node_files()
 mk_dotnet()
 mk_dotnet_wrappers()
 mk_java()
