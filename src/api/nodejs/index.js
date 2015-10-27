@@ -2,6 +2,7 @@ var ref = require('ref');
 var core = require('./js/z3core');
 var consts = require('./js/z3consts');
 var types = require('./js/z3types');
+var assert = require('assert');
 
 exports.enable_trace = enable_trace;
 function enable_trace(msg) {
@@ -36,7 +37,7 @@ function _z3assert(cond, msg) {
   }
 }
 
-_z3assert(get_version_string() == '4.4.2', 'get_version_string check');
+assert.equal(get_version_string(), '4.4.2', 'get_version_string check');
 
 exports.open_log = open_log;
 function open_log(filename) {
@@ -50,20 +51,18 @@ function append_log(filename) {
 
 exports.to_symbol = to_symbol;
 function to_symbol(s, ctx) {
-  if (typeof(s) == 'Number' && parseInt(s) == s) {
+  if (typeof(s) == 'number' && parseInt(s) == s) {
     return core.mk_int_symbol(_get_ctx(ctx).ref(), s);
   } else {
     return core.mk_string_symbol(_get_ctx(ctx).ref(), s);
   }
 }
 
-console.log(to_symbol('x'));
-
-function _symbols2js(ctx, s) {
+function _symbol2js(ctx, s) {
   if (core.get_symbol_kind(ctx.ref(), s) == consts.INT_SYMBOL) {
     return "k!" + core.get_symbol_int(ctx.ref(), s);
   } else {
-    return core.get_sybol_string(ctx.ref(), s);
+    return core.get_symbol_string(ctx.ref(), s);
   }
 }
 
@@ -84,7 +83,8 @@ function Context(kw) {
 }
 Context.prototype.ref = function() {
   return this.ctx;
-}
+};
+
 // TODO: implement Context.prototype.interrupt.
 
 var _main_ctx = null;
@@ -103,4 +103,8 @@ function _get_ctx(ctx) {
     return ctx;
   }
 }
+
+var sym = to_symbol('x');
+assert.equal(_symbol2js(_get_ctx(), to_symbol("xfoo")), "xfoo");
+assert.equal(_symbol2js(_get_ctx(), to_symbol(42)), "k!42");
 
