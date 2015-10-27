@@ -503,6 +503,7 @@ module.exports = {
 var ffi = require('ffi');
 var ref = require('ref');
 var ArrayType = require('ref-array');
+var z3consts = require('./z3consts');
 var z3types = require('./z3types');
 
 // Z3 API Functions
@@ -523,11 +524,11 @@ def mk_node_wrapper(name, result, params):
     r = ['exports.%s = (function(%s) {\n  ' % (sname, mk_node_args(params))]
     if r != VOID:
         r.append("var r = ")
-    r.append("%s(%s);\n" % (name, mk_node_args(params)))
+    r.append("lib.%s(%s);\n" % (name, mk_node_args(params)))
     if len(params) > 0 and param_type(params[0]) == CONTEXT:
         c0 = mk_node_arg(params, 0)
         r.append("  var err = lib.Z3.get_error_code(%s);\n" % c0)
-        r.append("  if (err != z3const.Z3_OK) {\n   throw new Z3Exception(")
+        r.append("  if (err != z3consts.OK) {\n   throw new Z3Exception(")
         r.append("lib.Z3_get_error_msg_ex(%s, err));\n  }\n" % c0)
     if r != VOID:
         r.append("  return r;\n")
