@@ -224,17 +224,108 @@ function _ctx_from_ast_args() {
   return _ctx_from_ast_arg_list(arguments);
 }
 function _to_func_decl_array(args) {
-  var fd_args = [];
+  var fd_args = FunctionDeclArray(args.length);
   for (var j = 0; j < args.length; ++j) {
-    fd_args.push(args[j].as_func_decl());
+    fd_args[j] = args[j].as_func_decl();
   }
   return fd_args;
 }
 function _to_ast_array(args) {
-  var ast_args = [];
+  var ast_args = AstArray(args.length);
   for (var j = 0; j < args.length; ++j) {
-    ast_args.push(args[j].as_ast());
+    ast_args[j] = args[j].as_ast();
   }
   return ast_args;
 }
+function _to_ast_ref(a, ctx) {
+  var k = _ast_kind(ctx, a);
+  if (k = consts.SORT_AST) {
+    return _to_sort_ref(a, ctx);
+  } else if (k == consts.Z3_FUNC_DECL_AST) {
+    return _to_func_decl_ref(a, ctx);
+  } else {
+    return _to_expr_ref(a, ctx);
+  }
+}
+//////////////////////////////////////////
+//
+// Sorts
+//
+//////////////////////////////////////////
+function _sort_kind(ctx, s) {
+  return core.get_sort_kind(ctx.ref(), s);
+}
 
+exports.SortRef = SortRef;
+function SortRef() { AstRef.apply(this, arguments); }
+util.inherits(SortRef, AstRef);
+SortRef.prototype.ast = function() {
+  return core.sort_to_ast(this.ctx_ref, this.ast);
+}
+SortRef.prototype.get_id = function() {
+  return core.get_ast_id(this.ctx_ref, this.as_ast());
+}
+SortRef.prototype.kind = function() {
+  return _sort_kind(this.ctx, this.ast);
+}
+SortRef.prototype.subsort = function(other) {
+  return false;
+}
+SortRef.prototype.cast = function(val) {
+  _z3_assert(is_expr(val), "Z3 expression expected")
+  _z3_assert(this.equals(val.sort()), "Sort mismatch")
+  return val;
+}
+SortRef.prototype.name = function() {
+  return _symbol2js(this.ctx, core.get_sort_name(this.ctx_ref(), this.ast));
+}
+SortRef.equals = function(other) {
+  if (other == null) {
+    return false;
+  }
+  return core.is_eq_sort(this.ctx_ref(), this.ast, other.ast);
+}
+exports.is_sort = is_sort;
+function is_sort(s) {
+  return s instanceof SortRef;
+}
+
+function _to_sort_ref(s, ctx) {
+  _z3_assert(s instanceof Sort, "Z3 Sort expected");
+  var k = _sort_kind(ctx, s);
+  if (k == consts.BOOL_SORT) {
+    return new BoolSortRef(s, ctx);
+  } else if (k == consts.INT_SORT || k == consts.REAL_SORT) {
+    return new ArithSortRef(s, ctx);
+  } else if (k == consts.BV_SORT) {
+    return new BitVecSortRef(s, ctx);
+  } else if (k == consts.ARRAY_SORT) {
+    return new ArraySortRef(s, ctx);
+  } else if (k == consts.DATATYPE_SORT) {
+    return new DatatypeSortRef(s, ctx);
+  } else if (k == consts.FINITE_DOMAIN_SORT) {
+    return new FiniteDomainSortRef(s, ctx);
+  } else if (k == consts.FLOATING_POINT_SORT) {
+    return new FPSortRef(s, ctx);
+  } else if (k == consts.ROUNDING_MODE_SORT) {
+    return new FPRMSortRef(s, ctx);
+  } else {
+    return new SortRef(s, ctx);
+  }
+}
+function _sort(ctx, a) {
+  return _to_sort_ref(core.get_sort(ctx.ref(), a), ctx);
+}  
+exports.DeclareSort = DeclareSort;
+function DeclareSort(name, ctx) {
+  ctx = _get_ctx(ctx);
+  return new SortRef(core.mk_uninterpreted_sort(ctx.ref(), to_symbol(name, ctx)), ctx);
+}
+
+assert.equal(DeclareSort('A').name(), 'A');
+
+//////////////////////////////////////////
+//
+// Function Declarations
+//
+//////////////////////////////////////////

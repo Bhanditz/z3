@@ -356,12 +356,16 @@ def param2pystr(p):
         return type2pystr(param_type(p))
 
 def param2nodestr(p):
+    t = param_type(p)
     if param_kind(p) == IN_ARRAY or param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY:
-        return "ArrayType(%s)" % type2nodestr(param_type(p))
+        if is_obj(t) or t == SYMBOL:
+            return "%sArray" % type2nodestr(t)
+        else:
+            return "ArrayType(%s)" % type2nodestr(t)
     elif param_kind(p) == OUT:
-        return "ref.refType(%s)" % type2nodestr(param_type(p))
+        return "ref.refType(%s)" % type2nodestr(t)
     else:
-        return type2nodestr(param_type(p))
+        return type2nodestr(t)
 
 def param2ml(p):
     k = param_kind(p)
@@ -458,14 +462,14 @@ def mk_node_files():
     lines = []
     for k, name in Type2NodeStr.iteritems():
         if is_obj(k):
-            lines.append('%s: ref.refType(ref.types.void)' % name)
-        else:
-            lines.append('// %s' % name)
-    typedecls = ',\n  '.join(lines)
+            lines.append("var %s = exports.%s = ref.refType(ref.types.void);" % (name, name))
+            lines.append("var %sArray = exports.%sArray = ArrayType(%s);" % (name, name, name))
+    typedecls = '\n'.join(lines) + '\n'
     with open(node_type_file, 'w') as type_js:
        type_js.write("""
 // Automatically generated file
 var ref = require('ref');
+var ArrayType = require('ref-array');
 var ffi = require('ffi');
 
 function Z3Exception(message) {
@@ -482,13 +486,11 @@ Z3Exception.prototype.name = "Z3Exception";
 Z3Exception.prototype.constructor = Z3Exception;
 
 // Z3 API Types
-module.exports = {
-  Z3Exception: Z3Exception,
-  Symbol: ref.refType(ref.types.void),
-  ErrorHandlerFptr: ffi.Function(ref.types.void,[ref.refType(ref.types.void),ref.types.uint]),
-  """ + typedecls + """
-};
-""")
+exports.Z3Exception =Z3Exception;
+var Symbol = exports.Symbol = ref.refType(ref.types.void);
+var SymbolArray = exports.SymbolArray = ArrayType(Symbol);
+var ErrorHandlerFptr = exports.ErrorHandlerFptr = ffi.Function(ref.types.void,[ref.refType(ref.types.void),ref.types.uint]);
+  """ + typedecls + "\n")
 
     blines = []
     wlines = []
