@@ -148,8 +148,14 @@ Type2PyStr = { VOID_PTR : 'ctypes.c_void_p', INT : 'ctypes.c_int', UINT : 'ctype
 
 Type2NodeStr = { VOID: 'ref.types.void', VOID_PTR : 'ref.refType(ref.types.void)', INT : 'ref.types.int', UINT : 'ref.types.uint', INT64 : 'ref.types.int64',
                UINT64 : 'ref.types.uint64', DOUBLE : 'ref.types.double', FLOAT : 'ref.types.float',
-               STRING : 'ref.types.CString', STRING_PTR : 'ref.refType(ref.types.CString)', BOOL : 'ref.types.bool', SYMBOL : 'ref.types.long',
+               STRING : 'ref.types.CString', STRING_PTR : 'ref.refType(ref.types.CString)', BOOL : 'ref.types.bool', SYMBOL : 'z3types.Symbol',
                PRINT_MODE : 'ref.types.uint', ERROR_CODE : 'ref.types.uint'
+               }
+
+Type2VarName = { VOID: 'v', VOID_PTR : 'p', INT : 'i', UINT : 'u', INT64 : 'l',
+               UINT64 : 'ul', DOUBLE : 'd', FLOAT : 'f',
+               STRING : 's', STRING_PTR : 'ps', BOOL : 'b', SYMBOL : 'y',
+               PRINT_MODE : 'pm', ERROR_CODE : 'er'
                }
 
 # Mapping to .NET types
@@ -211,6 +217,13 @@ def type2nodestr(ty):
       return 'z3types.' + Type2NodeStr[ty]
     else:
       return Type2NodeStr[ty]
+
+def type2nodevar(ty):
+    global Type2VarName
+    if is_obj(ty):
+      return Type2NodeStr[ty][:3].lower()
+    else:
+      return Type2VarName[ty]
 
 def type2dotnet(ty):
     global Type2Dotnet
@@ -343,7 +356,9 @@ def param2pystr(p):
         return type2pystr(param_type(p))
 
 def param2nodestr(p):
-    if param_kind(p) == IN_ARRAY or param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY or param_kind(p) == OUT:
+    if param_kind(p) == IN_ARRAY or param_kind(p) == OUT_ARRAY or param_kind(p) == IN_ARRAY or param_kind(p) == INOUT_ARRAY:
+        return "ArrayType(%s)" % type2nodestr(param_type(p))
+    elif param_kind(p) == OUT:
         return "ref.refType(%s)" % type2nodestr(param_type(p))
     else:
         return type2nodestr(param_type(p))
@@ -440,41 +455,84 @@ def reg_node_binding(name, result, params):
 def mk_node_files():
     global node_type_file
     global node_core_file
+    lines = []
+    for k, name in Type2NodeStr.iteritems():
+        if is_obj(k):
+            lines.append('%s: ref.refType(ref.types.void)' % name)
+        else:
+            lines.append('// %s' % name)
+    typedecls = ',\n  '.join(lines)
     with open(node_type_file, 'w') as type_js:
-       lines = []
-       for k, name in Type2NodeStr.iteritems():
-            if is_obj(k):
-                lines.append('%s: ref.refType(ref.types.void)' % name)
-            else:
-                lines.append('// %s' % name)
-       typedecls = ',\n  '.join(lines)
        type_js.write("""
 // Automatically generated file
 var ref = require('ref');
 
+function Z3Exception(message) {
+    this.message = message;
+    // Use V8's native method if available, otherwise fallback
+    if ("captureStackTrace" in Error)
+        Error.captureStackTrace(this, Z3Exception);
+    else
+        this.stack = (new Error()).stack;
+}
+
+Z3Exception.prototype = Object.create(Error.prototype);
+Z3Exception.prototype.name = "Z3Exception";
+Z3Exception.prototype.constructor = Z3Exception;
+
 // Z3 API Types
 module.exports = {
+  Z3Exception: Z3Exception,
+  Symbol: ref.refType(ref.types.void),
   """ + typedecls + """
 };
 """)
 
+    blines = []
+    wlines = []
+    for name, result, params in _node_decls:
+        pl = ','.join([param2nodestr(p) for p in params])
+        blines.append("'%s': [%s,[%s]]" % (name, type2nodestr(result), pl))
+        wlines.append(mk_node_wrapper(name, result, params))
+    bindings = ',\n  '.join(blines)
+    wrappers = '\n'.join(wlines)
+    
     with open(node_core_file, 'w') as core_js:
-        lines = []
-        for name, result, params in _node_decls:
-            pl = ','.join([param2nodestr(p) for p in params])
-            lines.append("'%s': [%s,[%s]]" % (name, type2nodestr(result), pl))
-        bindings = ',\n  '.join(lines)
         core_js.write("""
 // Automatically generated file
-var ref = require('ref');
 var ffi = require('ffi');
+var ref = require('ref');
+var ArrayType = require('ref-array');
 var z3types = require('./z3types');
 
 // Z3 API Functions
-var z3core = module.exports = ffi.Library('libz3', {
-  """ + bindings + """\n
+var lib = ffi.Library('libz3', {
+  """ + bindings + """
 });
-""")
+
+""" + wrappers + "\n")
+
+def mk_node_arg(params, j):
+    return "%s%d" % (type2nodevar(param_type(params[j])), j)
+
+def mk_node_args(params):
+    return ', '.join([mk_node_arg(params, j) for j in xrange(0, len(params))])
+
+def mk_node_wrapper(name, result, params):
+    sname = name.replace('Z3_', '');
+    r = ['exports.%s = (function(%s) {\n  ' % (sname, mk_node_args(params))]
+    if r != VOID:
+        r.append("var r = ")
+    r.append("%s(%s);\n" % (name, mk_node_args(params)))
+    if len(params) > 0 and param_type(params[0]) == CONTEXT:
+        c0 = mk_node_arg(params, 0)
+        r.append("  var err = lib.Z3.get_error_code(%s);\n" % c0)
+        r.append("  if (err != z3const.Z3_OK) {\n   throw new Z3Exception(")
+        r.append("lib.Z3_get_error_msg_ex(%s, err));\n  }\n" % c0)
+    if r != VOID:
+        r.append("  return r;\n")
+    r.append("});\n");
+    return ''.join(r);
 
 ## .NET API native interface
 _dotnet_decls = []

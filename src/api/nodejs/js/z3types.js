@@ -2,8 +2,23 @@
 // Automatically generated file
 var ref = require('ref');
 
+function Z3Exception(message) {
+    this.message = message;
+    // Use V8's native method if available, otherwise fallback
+    if ("captureStackTrace" in Error)
+        Error.captureStackTrace(this, Z3Exception);
+    else
+        this.stack = (new Error()).stack;
+}
+
+Z3Exception.prototype = Object.create(Error.prototype);
+Z3Exception.prototype.name = "Z3Exception";
+Z3Exception.prototype.constructor = Z3Exception;
+
 // Z3 API Types
 module.exports = {
+  Z3Exception: Z3Exception,
+  Symbol: ref.refType(ref.types.void),
   // ref.types.void,
   // ref.refType(ref.types.void),
   // ref.types.int,
@@ -13,7 +28,7 @@ module.exports = {
   // ref.types.CString,
   // ref.refType(ref.types.CString),
   // ref.types.bool,
-  // ref.types.long,
+  // z3types.Symbol,
   // ref.types.uint,
   // ref.types.uint,
   // ref.types.double,
