@@ -466,6 +466,7 @@ def mk_node_files():
        type_js.write("""
 // Automatically generated file
 var ref = require('ref');
+var ffi = require('ffi');
 
 function Z3Exception(message) {
     this.message = message;
@@ -484,6 +485,7 @@ Z3Exception.prototype.constructor = Z3Exception;
 module.exports = {
   Z3Exception: Z3Exception,
   Symbol: ref.refType(ref.types.void),
+  ErrorHandlerFptr: ffi.Function(ref.types.void,[ref.refType(ref.types.void),ref.types.uint]),
   """ + typedecls + """
 };
 """)
@@ -492,7 +494,7 @@ module.exports = {
     wlines = []
     for name, result, params in _node_decls:
         pl = ','.join([param2nodestr(p) for p in params])
-        blines.append("'%s': [%s,[%s]]" % (name, type2nodestr(result), pl))
+        blines.append("%s: [%s,[%s]]" % (name, type2nodestr(result), pl))
         wlines.append(mk_node_wrapper(name, result, params))
     bindings = ',\n  '.join(blines)
     wrappers = '\n'.join(wlines)
@@ -507,7 +509,8 @@ var z3consts = require('./z3consts');
 var z3types = require('./z3types');
 
 // Z3 API Functions
-var lib = ffi.Library('libz3', {
+var lib = exports.lib = ffi.Library('libz3', {
+  Z3_set_error_handler: [ref.types.void,[z3types.Context,z3types.ErrorHandlerFptr]],
   """ + bindings + """
 });
 

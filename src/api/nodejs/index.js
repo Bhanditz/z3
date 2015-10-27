@@ -76,14 +76,20 @@ function Context(kw) {
   this.lib = core.lib;
   this.ctx = core.mk_context_rc(conf);
   core.set_ast_print_mode(this.ctx, consts.PRINT_SMTLIB2_COMPLIANT);
-  // TODO: z3.py uses core.set_error_handler here to set the z3 error
-  // handler to a function that does nothing, so that the errors
-  // can be turned into exceptions instead.  We should do the same.
+  // Set the error handelr to a function that does nothing.
+  this.lib.Z3_set_error_handler(this.ctx, function(obj, i) {});
   core.del_config(conf);
 }
 Context.prototype.ref = function() {
   return this.ctx;
 };
+Context.prototype.del = function() {
+  // Garbage collect a context: in JS, this needs to be called by hand.
+  if (this.ctx) {
+    this.lib.Z3_del_context(this.ctx);
+    this.ctx = null;
+  }
+}
 
 // TODO: implement Context.prototype.interrupt.
 

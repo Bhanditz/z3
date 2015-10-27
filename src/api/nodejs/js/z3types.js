@@ -1,6 +1,7 @@
 
 // Automatically generated file
 var ref = require('ref');
+var ffi = require('ffi');
 
 function Z3Exception(message) {
     this.message = message;
@@ -19,6 +20,7 @@ Z3Exception.prototype.constructor = Z3Exception;
 module.exports = {
   Z3Exception: Z3Exception,
   Symbol: ref.refType(ref.types.void),
+  ErrorHandlerFptr: ffi.Function(ref.types.void,[ref.refType(ref.types.void),ref.types.uint]),
   // ref.types.void,
   // ref.refType(ref.types.void),
   // ref.types.int,
