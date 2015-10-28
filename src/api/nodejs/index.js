@@ -67,6 +67,18 @@ function _symbol2js(ctx, s) {
   }
 }
 
+// Hack for allowing nary functions that can receive one argument that
+// is a list of arguments.
+function _get_args(args, pos) {
+  if (args.length <= pos) {
+    return [];
+  }
+  if (args.length == pos + 1 && (args[pos] instanceof Array)) {
+    return args[pos];
+  }
+  return Array.prototype.slice(args, pos);
+}
+
 exports.Context = Context;
 function Context(kw) {
   var conf = core.mk_config();
@@ -241,7 +253,7 @@ function _to_ast_ref(a, ctx) {
   var k = _ast_kind(ctx, a);
   if (k = consts.SORT_AST) {
     return _to_sort_ref(a, ctx);
-  } else if (k == consts.Z3_FUNC_DECL_AST) {
+  } else if (k == consts.FUNC_DECL_AST) {
     return _to_func_decl_ref(a, ctx);
   } else {
     return _to_expr_ref(a, ctx);
@@ -329,3 +341,289 @@ assert.equal(DeclareSort('A').name(), 'A');
 // Function Declarations
 //
 //////////////////////////////////////////
+
+
+exports.FuncDeclRef = FuncDeclRef;
+function FuncDeclRef() { AstRef.apply(this, arguments); }
+
+FuncDeclRef.prototype.ast = function() {
+  return core.func_decl_to_ast(this.ctx_ref, this.ast);
+}
+FuncDeclRef.prototype.get_id = function() {
+  return core.get_ast_id(this.ctx_ref, this.as_ast());
+}
+FuncDeclRef.prototype.as_func_decl = function() {
+  return this.ast;
+}
+FuncDeclRef.prototype.name = function() {
+  return _symbol2js(this.ctx, core.get_decl_name(this.ctx_ref(), this.ast));
+}
+FuncDeclRef.prototype.arity = function() {
+  return core.get_arity(this.ctx_ref(), this.ast);
+}
+FuncDeclRef.prototype.domain = function(i) {
+  _z3_assert(i < this.arity(), "Index out of bounds");
+  return _to_sort_ref(core.get_domain(this.ctx_ref(), this.ast, i), this.ctx);
+}
+FuncDeclRef.prototype.kind = function() {
+  return core.get_decl_kind(this.ctx_ref(), this.ast);
+}
+FuncDeclRef.prototype.call = function() {
+  var args = _get_args(arguments, 0);
+  var num = args.length;
+  _z3_assert(num == this.arity(), "Incorrect number of arguments to " + this.name());
+  var _args = new AstArray(num);
+  var saved = [];
+  for (var j = 0; j < num; ++j) {
+    var tmp = this.domain(j).cast(args[j]);
+    saved.push(tmp);
+    _args[j] = tmp.as_ast();
+  }
+  return _to_expr_ref(
+      core.mk_app(this.ctx_ref(), this.ast, num, _args), this.ctx);
+}
+exports.is_func_decl = is_func_decl;
+function is_func_decl(a) {
+  return (a instanceof FuncDeclRef);
+}
+exports.Function = Z3Function;
+function Z3Function(name) {
+  var sig = _get_args(arguments, 1);
+  _z3_assert(sig.length > 0, "At least two arguments expected");
+  var arity = sig.length - 1;
+  var rng = sig[arity];
+  _z3_assert(_is_sort(rng), "Z3 sort expected");
+  var dom = new SortArray(arity);
+  for (var j = 0; j < arity; ++j) {
+    _z3_assert(_is_sort(sig[j]), "Z3 sort expected");
+    dom[j] = sig[j].ast;
+  }
+  var ctx = rng.ctx;
+  return new FuncDeclRef(core.mk_func_decl(ctx.ref(), to_symbol(name, ctx), arity, dom, rng.ast), ctx);
+}
+function _to_func_decl_ref(a, ctx) {
+  return new FuncDeclRef(a, ctx);
+}
+
+//////////////////////////////////////////
+//
+// Expressions
+//
+//////////////////////////////////////////
+exports.ExprRef = ExprRef;
+function ExprRef() { AstRef.apply(this, arguments); }
+util.inherits(ExprRef, AstRef);
+ExprRef.prototype.sort = function() {
+  return _sort(self.ctx, self.as_ast());
+}
+ExprRef.prototype.sort_kind = function() {
+  return this.sort().kind();
+}
+ExprRef.prototype.equals = function(other) {
+  if (other == null) {
+    return false;
+  }
+  var _r = _coerce_exprs(this, other);
+  return new BoolRef(core.mk_eq(this.ctx_ref(), a.as_ast(), b.as_ast()), self.ctx);
+}
+ExprRef.prototype.decl = function() {
+  _z3_assert(is_app(this), "Z3 application expected");
+  return FuncDeclRef(core.get_app_decl(this.ctx_ref(), this.as_ast()), this.ctx);
+}
+ExprRef.prototype.num_args = function() {
+  _z3_assert(is_app(this), "Z3 application expected");
+  return int(core.get_app_num_args(this.ctx_ref(), this.as_ast()));
+}
+ExprRef.prototype.arg = function(j) {
+  _z3_assert(is_app(this), "Z3 application expected");
+  _z3_assert(idx < this.num_args(), "invalid argument index " + idx);
+  return _to_expr_ref(core.get_app_arg(this.ctx_ref(), this.as_ast(), idx), this.ctx);
+}
+ExprRef.prototype.children = function() {
+  var result = [];
+  if (is_app(self)) {
+    for (var j = 0; j < this.num_args(); ++j) {
+      result.push(this.arg(j));
+    }
+  }
+  return result;
+}
+function _to_expr_ref(a, ctx) {
+  // TODO: in JavaScript, this instanceof might not work; fix this
+  // in the code generation by marking patterns.
+  if (a instanceof Pattern) {
+    return PatternRef(a, ctx);
+  }
+  var ctx_ref = ctx.ref();
+  var k = core.get_ast_kind(ctx_ref, a);
+  if (k == consts.QUANTIFIER_AST) {
+    return new QuantifierRef(a, ctx);
+  }
+  var sk = core.get_sort_kind(ctx_ref, core.get_sort(ctx_ref, a));
+  if (sk == consts.BOOL_SORT) {
+    return BoolRef(a, ctx);
+  }
+  if (sk == consts.INT_SORT) {
+    if (k == consts.NUMERAL_AST) {
+      return IntNumRef(a, ctx);
+    }
+    return ArithRef(a, ctx);
+  }
+  if (sk == consts.REAL_SORT) {
+    if (k == consts.NUMERAL_AST) {
+      return RatNumRef(a, ctx);
+    }
+    if (_is_algebraic(ctx, a)) {
+      return AlgebraicNumRef(a, ctx);
+    }
+    return ArithRef(a, ctx);
+  }
+  if (sk == consts.BV_SORT) {
+    if (k == consts.NUMERAL_AST) {
+      return BitVecNumRef(a, ctx);
+    } else {
+      return BitVecRef(a, ctx);
+    }
+  }
+  if (sk == consts.ARRAY_SORT) {
+    return ArrayRef(a, ctx);
+  }
+  if (sk == consts.DATATYPE_SORT) {
+    return DatatypeRef(a, ctx);
+  }
+  if (sk == consts.FLOATING_POINT_SORT) {
+    if (k == consts.APP_AST && _is_numeral(ctx, a)) {
+      return FPNumRef(a, ctx);
+    } else {
+      return FPRef(a, ctx);
+    }
+  }
+  if (sk == consts.ROUNDING_MODE_SORT) {
+    return FPRMRef(a, ctx)
+  }
+  return ExprRef(a, ctx);
+}
+function _coerce_expr_merge(s, a) {
+  if (is_expr(a)) {
+    var s1 = a.sort();
+    if (s == null) {
+      return s1;
+    }
+    if (s1.equals(s)) {
+      return s;
+    } else if (s.subsort(s1)) {
+      return s1;
+    } else if (s1.subsort(s)) {
+      return s;
+    } else {
+      _z3_assert(s1.ctx == s.ctx, "context mismatch");
+      _z3_assert(false, "sort mismatch");
+    }
+  } else {
+    return s;
+  }
+}
+function _coerce_exprs(a, b, ctx) {
+  if (!is_expr(a) && !is_expr(b)) {
+    a = _js2expr(a, ctx);
+    b = _js2expr(b, ctx);
+  } else {
+    s = null;
+    s = _coerce_expr_merge(s, a);
+    s = _coerce_expr_merge(s, b);
+    a = s.cast(a);
+    b = s.cast(b);
+    return { a: a, b: b };
+  }
+}
+function _reduce(f, l, a) {
+  var r = a, len = length(l);
+  for (var j = 0; j < len; ++j ) {
+    r = f(r, l[j]);
+  }
+  return r
+}
+function _coerce_expr_list(alist, ctx) {
+  var has_expr = false, len = alist.length, j;
+  for (j = 0; j < len; ++j) {
+    var a = alist[j];
+    if (is_expr(a)) {
+      has_expr = true;
+      break;
+    }
+  }
+  if (!has_expr) {
+    var alist2 = [];
+    for (j = 0; j < len; ++j) {
+      alist2.push(_js2expr(alist[j], ctx));
+    }
+    alist = alist2;
+  }
+  var s = _reduce(_coerce_expr_merge, alist, null);
+  var result = [];
+  for (j = 0; j < len; ++j) {
+    result.push(s.cast(a));
+  }
+  return result;
+}
+exports.is_expr = is_expr;
+function is_expr(a) {
+  return (a instanceof ExprRef);
+}
+exports.is_app = is_app;
+function is_app(a) {
+  if (!(a instanceof ExprRef)) {
+    return false;
+  }
+  var k = _ast_kind(a.ctx, a);
+  return (k == consts.NUMERAL_AST || k == consts.APP_AST);
+}
+exports.is_const = is_const;
+function is_const(a) {
+  return is_app(a) && a.num_args() == 0;
+}
+exports.is_var = is_var;
+function is_var(a) {
+  return is_expr(a) && _ast_kind(a.ctx, a) == consts.VAR_AST;
+}
+exports.get_var_index = get_var_index;
+function get_var_index(a) {
+  _z3_assert(is_var(a), "Z3 bound variable expected");
+  return core.get_index_value(a.ctx.ref(), a.as_ast());
+}
+exports.is_app_of = is_app_of;
+function is_app_of(a, k) {
+  return is_app(a) && a.decl().kind() == k;
+}
+
+function If(a, b, c, ctx) {
+  // TODO: this probably doesn't work
+  if (a instanceof Probe || b instanceof Tactic || c instanceof Tactic) {
+    return Cond(a, b, c, ctx);
+  } else {
+    ctx = _get_ctx(_ctx_from_ast_arg_list([a, b, c], ctx));
+    var s = BoolSort(ctx);
+    var a = s.cast(a);
+    var r = _coerce_exprs(b, c, ctx);
+    b = r.a;
+    c = r.b;
+    _z3_assert(a.ctx == b.ctx, "Context mismatch");
+    return _to_expr_ref(core.mk_ite(ctx.ref(), a.as_ast(), b.as_ast(), c.as_ast()), ctx);
+  }
+}
+
+function Distinct() {
+  var args = _get_args(arguments, 0);
+  var ctx = _ctx_from_ast_arg_list(args);
+  _z3_assert(ctx != None, "At least one of the arguments must be a Z3 expression");
+  args = _coerce_expr_list(args, ctx);
+  var _args = _to_ast_array(args);
+  return BoolRef(core.mk_distinct(ctx.ref(), sz, _args), ctx);
+}
+function _mk_bin(f, a, b) {
+  var args = AstArray(2);
+  _z3_assert(a.ctx == b.ctx, "Context mistmatch")
+  args[0] = a.as_ast();
+  args[1] = b.as_ast();
+  return f(a.ctx.ref(), 2, args);
+}
